@@ -7,6 +7,7 @@ on:
 jobs:
   deploy:
     runs-on: ubuntu-latest
+
     steps:
     - name: Checkout code
       uses: actions/checkout@v3
@@ -29,26 +30,41 @@ jobs:
         SOURCE: "target/*.jar"
         TARGET: "/home/${{ secrets.EC2_USER }}/config-server"
         SCRIPT_AFTER: |
+          # --- VARIABLES DE CONFIGURACIÓN ---
           SERVICE_NAME="config-server"
           PORT=8888
-          DIR="/home/${{ secrets.EC2_USER }}/$SERVICE_NAME"
+          # Usamos la variable de entorno del usuario o 'ec2-user' por defecto
+          USER_HOME="/home/${{ secrets.EC2_USER }}"
+          DIR="$USER_HOME/$SERVICE_NAME"
           
-          echo "--- Desplegando $SERVICE_NAME ---"
+          echo "--- Iniciando despliegue de $SERVICE_NAME ---"
           
           # 1. Asegurar que el directorio existe
           mkdir -p $DIR
           
-          # 2. Detener proceso en el puerto
+          # 2. Detener cualquier proceso corriendo en el puerto 8888
+          echo "Liberando el puerto $PORT..."
           fuser -k $PORT/tcp || true
           
-          # 3. Moverse al directorio y limpiar
+          # 3. Moverse al directorio
           cd $DIR
-          # Mover el jar subido (que cae en target/) a la raíz del servicio
+          
+          # 4. Mover el JAR nuevo desde la carpeta target (que subió el plugin) a la raíz
           mv target/*.jar . 2>/dev/null || true
           rm -rf target
           
+          # 5. Encontrar el JAR más reciente
           NEW_JAR=$(ls -t *.jar | head -n 1)
-          echo "Ejecutando: $NEW_JAR"
+          echo "Jar seleccionado: $NEW_JAR"
           
-          # 4. Iniciar con memoria baja (192MB)
+          # 6. Borrar JARs viejos para no llenar el disco
+          ls *.jar | grep -v "$NEW_JAR" | xargs -r rm
+          
+          # 7. INICIAR EL SERVICIO
+          # -Xmx192m: Limitamos la RAM a 192MB para que quepan los 4 servicios en la capa gratuita
           nohup java -Xms192m -Xmx192m -jar "$NEW_JAR" > $SERVICE_NAME.log 2>&1 &
+          
+          echo "--- Despliegue finalizado. Verificando logs... ---"
+          sleep 2
+          # Mostramos las últimas líneas para ver si arrancó (opcional)
+          tail -n 10 $SERVICE_NAME.log
